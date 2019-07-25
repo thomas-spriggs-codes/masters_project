@@ -1,0 +1,147 @@
+###   Binning data taken from Planck Legacy Archive
+###   Returning average values of annuli around a given point (chosen to be the centre of the CMB Cold Spot)
+
+
+
+import astropy
+from astropy.io import fits
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+import time
+import scipy
+from scipy import stats
+t0 = time.time()
+
+
+
+NAME = 'Huge_CS_64' #CS_128 #CS_64 #Huge_CS_128
+FILE = 'E_mode'  #Total #E_mode #B_mode #
+
+
+
+## Define functions
+
+# Find centre of the Cold Spot, in terms of arguments
+def find_centre(lat,lon):
+    dif_lat = np.zeros(len(lon))
+    dif_lon = np.zeros(len(lon))
+    lat_mid_float = -56.3
+    lon_mid_float = 207.8
+    for i in range(len(lon)):
+        dif_lat[i] = abs(lat[i] - lat_mid_float)
+        dif_lon[i] = abs(lon[i] - lon_mid_float)
+    lat_mid = lat[np.argmin(dif_lat)]
+    lon_mid = lon[np.argmin(dif_lon)]
+    return lat_mid, lon_mid      
+
+#     Tranform all coorindates to be centred at the mid point
+def shift_mid_point(old_lat, old_lon, lat_mid, lon_mid):
+    new_lat = np.zeros(len(lat))
+    new_lon = np.zeros(len(lon))
+    for i in range(len(lat)):
+        new_lat[i] = old_lat[i] - lat_mid
+        new_lon[i] = old_lon[i] - lon_mid
+    return new_lat, new_lon
+
+#     Change into polar coodrinates
+def cart2pol(x, y):
+    rho = np.sqrt(x**2 + y**2)
+    phi = np.arctan2(y, x)
+    return(rho, phi)
+    
+
+#### Open data ####
+
+hdul = fits.open('C:\Users\Thomas\Desktop\Project\Data\Final\CS\%s\%s.fits'%(FILE,NAME))
+data = hdul[1].data
+I = data.field('T')
+Q = data.field('Q')
+U = data.field('U')
+theta = data.field('theta')
+hpx = data.field('hpx')
+lat = data.field('lat')
+lon = data.field('lon')
+P = data.field('P')
+
+
+
+
+## Call functions
+    
+# Find the index that corresponds to the centre of the Cold Spot   
+lat_mid, lon_mid = find_centre(lat,lon)
+
+# Shift all the coordinates s.t. the centre is the Cold Spot, 
+# As long as they stay in the same order, then binning works
+shifted_lat = np.zeros(len(lat))
+shifted_lon = np.zeros(len(lon))
+shifted_lat, shifted_lon = shift_mid_point(lat, lon, lat_mid, lon_mid)
+  
+# Change into polar coordinates to bin at different radii
+rho = np.zeros(len(lat))
+phi = np.zeros(len(lon))
+rho,phi = cart2pol( shifted_lat, shifted_lon)
+print max(rho)
+
+
+
+# Pick bin width 
+
+bin_edges = np.array([0,10, 20, 30, 40, 50 ]) #0 to 35 normal, 0 to 50 huge
+n = len(bin_edges)
+
+
+## Create the P dot radial data 
+P_dot = np.zeros(len(P))
+for i in range(len(P)):
+    P_dot[i] =  abs(P[i] * np.cos(abs(theta[i] - phi[i])))
+
+ 
+        
+## Errors
+Pdot_error, a, b = scipy.stats.binned_statistic(rho, P_dot ,statistic = np.std , bins = bin_edges)
+P_error, a, b = scipy.stats.binned_statistic(rho,P,statistic = np.std , bins = bin_edges)
+Q_error, a, b = scipy.stats.binned_statistic(rho,Q,statistic = np.std , bins = bin_edges)
+U_error, a, b = scipy.stats.binned_statistic(rho,U,statistic = np.std , bins = bin_edges)
+T_error, a, b = scipy.stats.binned_statistic(rho,I,statistic = np.std , bins = bin_edges)
+
+## Data 
+Pdot_binned, a, b = scipy.stats.binned_statistic(rho, P_dot ,statistic = np.mean , bins = bin_edges)
+P_binned, a, b = scipy.stats.binned_statistic(rho,P,statistic = np.mean , bins = bin_edges)
+Q_binned, a, b = scipy.stats.binned_statistic(rho,Q,statistic = np.mean , bins = bin_edges)
+U_binned, a, b = scipy.stats.binned_statistic(rho,U,statistic = np.mean , bins = bin_edges)
+T_binned, a, b = scipy.stats.binned_statistic(rho,I,statistic = np.mean , bins = bin_edges)
+
+N , a, b = scipy.stats.binned_statistic(rho,U,statistic = 'count' , bins = bin_edges)
+
+# Normalise for how many readins fell into each bin  
+for i in range(len(U_error)): 
+    Pdot_error[i] = Pdot_error[i] /(N[i]**.5)     
+    P_error[i] = P_error[i] /(N[i]**.5)
+    Q_error[i] = Q_error[i] /(N[i]**.5)   
+    U_error[i] = U_error[i] /(N[i]**.5)        
+    T_error[i] = T_error[i] /(N[i]**.5) 
+
+## Save all data 
+print Q_binned
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\P_%s_set_edges'%(FILE,NAME), P_binned) 
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Pdot_%s_set_edges'%(FILE,NAME), Pdot_binned) 
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Q_%s_set_edges'%(FILE,NAME), Q_binned)  
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\U_%s_set_edges'%(FILE,NAME,), U_binned) 
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\T_%s_set_edges'%(FILE,NAME,), T_binned) 
+
+# Bin edges
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Edges_%s_set_edges'%(FILE,NAME), bin_edges) 
+
+# Error
+
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\P_Error_%s_set_edges'%(FILE,NAME), P_error) 
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Pdot_Error_%s_set_edges'%(FILE,NAME), Pdot_error) 
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Q_Error_%s_set_edges'%(FILE,NAME), Q_error) 
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\U_Error_%s_set_edges'%(FILE,NAME), U_error) 
+np.savetxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\T_Error_%s_set_edges'%(FILE,NAME), T_error) 
+
+
+print time.time() - t0, 'time'
