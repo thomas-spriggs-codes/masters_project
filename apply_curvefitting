@@ -1,0 +1,155 @@
+###   Written in 2.7 before changing to 3.x
+###   Tasked with searching for a predicted pattern in the Cosmic Microwave Background, this code returns the likelihood that 
+###    the pattern lives within the data, and compares to the liklehood it doesn't using a delta chi-squared method
+###   Takes Stokes' parameters as input, taken from the Planck Legacy Archive
+###   Data orignally hanlded in TOPCAT
+
+
+
+import astropy
+from astropy.io import fits
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
+import time
+import scipy
+from scipy import stats
+from making_shiftable_czech import parameters # class i made in same file ## Not on github
+from scipy.optimize import curve_fit
+import matplotlib.gridspec as gridspec
+import matplotlib.ticker as plticker
+
+
+## Constants
+bin_width = 10 #degree # 1 or 2 , 5
+czech_peak = 7e-8
+
+
+## Import optimised Gaussain parameters that fit Czech data 
+parameters = parameters()
+h = parameters.h
+opt_czech_peak = parameters.peak
+sigsq = parameters.sigsq
+
+### Load binned data
+## FIX ALL TO MATCH
+
+
+NAME = 'Huge_CS_64' #CS_128 #CS_64 #Huge_CS_128
+FILE = 'E_mode'  #Total #E_mode #B_mode #
+
+
+## 10 DEG 
+# Data # Ignore last point 
+Q = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Q_%s_set_edges'%(FILE,NAME))
+U = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\U_%s_set_edges'%(FILE,NAME))
+P = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\P_%s_set_edges'%(FILE,NAME))
+T = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\T_%s_set_edges'%(FILE,NAME))
+Pdot = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Pdot_%s_set_edges'%(FILE,NAME))
+
+# Error
+Q_error = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Q_error_%s_set_edges'%(FILE,NAME))
+U_error = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\U_error_%s_set_edges'%(FILE,NAME))
+P_error = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\P_error_%s_set_edges'%(FILE,NAME))
+T_error = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\T_error_%s_set_edges'%(FILE,NAME))
+Pdot_error = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Pdot_error_%s_set_edges'%(FILE,NAME))
+
+# Bin edges
+bin_edges = np.loadtxt('C:\Users\Thomas\Desktop\Project\Data\Final\Binned\%s\Edges_%s_set_edges'%(FILE,NAME))
+
+
+## Turn bin edges into the middle of the bins
+def edge_to_middle(edges):
+    mids = np.zeros(len(edges)-1)
+
+    for i in range(len(mids)):
+        mids[i] = (edges[i] + edges[i+1]) / 2.0
+    return mids  
+    
+## Weighted mean    
+def weighted_mean(vals,errs):
+    weights = np.zeros(len(errs))
+    numerators = np.zeros(len(errs))
+    for i in range(len(weights)):
+        weights[i] = 1/(errs[i]**2)
+        numerators[i] = weights[i] * vals[i]
+    w_mean = np.sum(numerators)/np.sum(weights)    
+    w_err = 1/ np.sqrt(np.sum(weights)) 
+    return w_mean, w_err
+
+w_mean, w_err =   weighted_mean(Pdot[2:], Pdot_error[2:])
+bin_mids = edge_to_middle(bin_edges)
+
+
+
+
+
+
+## Creating functions
+
+def Gaussian( x,peak):
+    y = h * np.exp ( -1 * (x - peak) **2 / ( 2 * sigsq ) ) + np.mean(Pdot)
+    return y
+     
+def calc_chisq(x,y_model,y_observed, observed_error):  
+    chisq = np.zeros(len(x))
+    for i in range(len(x)):
+        chisq[i] = (y_model[i] - y_observed[i])**2 / (observed_error[i]) **2
+    c = sum(chisq)
+    return c 
+    
+def add_quadrature(val1s, val2s,err1s, err2s):
+    new_err = np.sqrt( (err1s/val1s)**2 + (err2s/val2s)**2 )
+    return new_err         
+        
+
+
+
+# Error in taking the peak away from the weighted mean background is the error in each added in quadrature
+peaked_value = max(Pdot)
+peaked_values_error = Pdot_error[np.argmax(Pdot)]
+relative_error_in_diff = add_quadrature(peaked_value,w_mean,peaked_values_error,w_err)
+print relative_error_in_diff
+# Replace peaked error with error
+Pdot_new_error = Pdot_error.copy()
+Pdot_new_error[np.argmax(Pdot)] = relative_error_in_diff * Pdot[np.argmax(Pdot)]
+
+
+# Make models to check against
+flat_line_model = w_mean * np.ones(len(bin_mids))
+bump_model = flat_line_model.copy()
+bump_model[np.argmax(Pdot)] = bump_model[np.argmax(Pdot)]  + czech_peak
+
+
+
+chi_sq_flat_line = calc_chisq(bin_mids, flat_line_model, Pdot, Pdot_new_error )
+print chi_sq_flat_line
+chi_sq_bump = calc_chisq(bin_mids, bump_model, Pdot, Pdot_new_error )
+print chi_sq_bump
+
+
+#print 'peak is =' ,max(P) - flat_line_model[0] , '+/-' ,  abs(relative_error_in_diff * max(P))
+
+### Plotting
+fig = plt.figure()
+
+st = fig.suptitle("$\\chi ^2$ = %f flat, and %f with peak, peak is %.2e +/- %.2e , %s, %s"%(chi_sq_flat_line,chi_sq_bump,max(Pdot) - flat_line_model[0],abs(relative_error_in_diff * max(Pdot)), NAME, FILE), fontsize="x-large",wrap = True)
+ax1 = fig.add_subplot(111)
+plt.errorbar(bin_mids, Pdot, yerr = Pdot_error, capsize = 10, color = 'navy')
+ax1.errorbar(bin_mids, Pdot, yerr = Pdot_new_error, capsize = 3, color = 'red', label = 'Pdot')
+ax1.errorbar(bin_mids, flat_line_model, yerr=  w_err*np.ones(len(bin_mids)), capsize = 10, color = 'blue', label = 'Flat line model')
+ax1.errorbar(bin_mids, bump_model, yerr=  w_err*np.ones(len(bin_mids)), capsize = 5, color = 'blue', linestyle = '--', label = 'Czech model')
+plt.ylabel('Pdot')
+plt.xlabel('$\\theta$')
+plt.legend(loc = 2)
+
+ax2= ax1.twinx()
+ax2.errorbar(bin_mids, T, yerr = T_error, color = 'purple', linestyle = '-.', label = 'T')
+ax2.plot(bin_mids, np.zeros(len(bin_mids)), color = 'purple', label = 'T=0')
+plt.ticklabel_format( axis='y', style='sci', scilimits=(0,10))
+ax2.set_ylabel('T', color = 'purple')
+plt.legend(loc = 4)
+
+
+plt.show()
